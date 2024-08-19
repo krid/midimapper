@@ -1,6 +1,6 @@
-#!/home/krid/bin/pyvirtenv/bin/python3
+#!/usr/bin/env python3
 #
-# Copyright (C) 2022 Dirk Bergstrom <dirk@otisbean.com>. All Rights Reserved.
+# Copyright (C) 2022-2024 Dirk Bergstrom <dirk@otisbean.com>. All Rights Reserved.
 #
 # Xlib code for keystroke generation originally by Joel Holveck <joelh@piquan.org>
 #
@@ -17,6 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import errno
 import functools
 import select
 import struct
@@ -43,6 +44,12 @@ Input = namedtuple("Input", ('control', 'keyspec', 'desc'))
 #         "key spec description"
 #     )
 # }
+#
+# Where:
+#   <typ> is 1 (on/off button) or 2 (stick / trigger / throttle / etc)
+#   <number> varies between manufacturers; use "jstest /dev/input/js0"
+#     The numbers shown below work for most, but not all, gamepads.
+#   <value> is the value that triggers the behavior.
 #
 # Where <key spec> is one of:
 #
@@ -71,7 +78,10 @@ Input = namedtuple("Input", ('control', 'keyspec', 'desc'))
 # * The joystick drivers supposedly support some level of auto-repeat.  You
 #   need to set an ioctl to turn it on.  Joel knows how...
 #
-# See /usr/include/X11/keysymdef.h for keycodes
+# See /usr/include/X11/keysymdef.h (from x11proto-core-dev) for keycodes.
+# There's also some multimedia keys in XF86keysym.h.
+#
+# FIXME: Read from a config file
 MAPPING = {
     (2, 8, 32767): Input('dpad-right', 'Right', 'Right'),
     (2, 8, -32767): Input('dpad-left', 'Left', 'Left'),
@@ -99,12 +109,19 @@ MAPPING = {
 }
 
 # What device are we looking at?
-CONTROLLER_DEVICE = '/dev/input/js0'
+DEFAULT_CONTROLLER_DEVICE = '/dev/input/js0'
+
+# Format of the packets we get from /dev/input/js0
+# See below where we call .unpack
+INPUT_STRUCT = struct.Struct('IhBB')
 
 
 class Program:
 
-    @functools.lru_cache()
+    def __init__(self, controller):
+        self.controller = controller
+
+    @functools.cache()
     def keysym2code(self, key):
         rv = self.display.keysym_to_keycode(Xlib.XK.string_to_keysym(key))
         if not rv:              # I think it returns 0, but maybe None
@@ -141,17 +158,17 @@ class Program:
     def handle_js(self):
         evbuf = None
         try:
-            evbuf = self.jsdev.read(8)
+            evbuf = self.jsdev.read(INPUT_STRUCT.size)
         except OSError as ose:
-            if ose.errno == 19:
-                # 19 == No such device == disconnected
+            if ose.errno == errno.ENODEV:
+                # No such device == disconnected
                 pass
             else:
                 raise
         if not evbuf:
-            # In practice we only get here in the OSError case
+            # In practice we only get here in the ENODEV case
             logging.info("Controller disconnected or unavailable at '%s'.",
-                         CONTROLLER_DEVICE)
+                         self.controller)
             sys.exit(0)
 
         # *** THIS IS WHERE WE DISPATCH JOYSTICK STUFF TO X STUFF ***
@@ -163,7 +180,7 @@ class Program:
         # To see the names of X keysyms, see:
         #     X11/keysymdef.h
         # The Python keysymdef modules are based on the preceding #ifdef.
-        _time, value, typ, number = struct.unpack('IhBB', evbuf)
+        _time, value, typ, number = INPUT_STRUCT.unpack(evbuf)
         inp = MAPPING.get((typ, number, value))
         if inp:
             logging.info("Controller event %s => %s", inp.control, inp.desc)
@@ -193,8 +210,8 @@ class Program:
         if ext is None:
             raise Exception("Cannot get XTEST extension")
 
-        self.jsdev = open(CONTROLLER_DEVICE, 'rb')
-        logging.info("Mapping inputs from %s", CONTROLLER_DEVICE)
+        self.jsdev = open(self.controller, 'rb')
+        logging.info("Mapping inputs from %s", self.controller)
 
         while True:
             (ready_to_read, _, _) = select.select(
@@ -209,10 +226,13 @@ class Program:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--controller", action="store",
+        default=DEFAULT_CONTROLLER_DEVICE,
+        help="Listen to this input")
     parser.add_argument("--debug", "-d", action="store_true",
         help="Show debug info and unused controller inputs")
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s %(levelname)s: %(message)s")
 
-    Program().run()
+    Program(controller=args.controller).run()
