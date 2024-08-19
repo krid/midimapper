@@ -367,7 +367,7 @@ class Program:
         # devices that can send and receive, and ignore MIDI THRU
         # ports.  The default flags already ignore system, no-export,
         # and unconnectable ports.
-        available_ports = self.client.list_ports(input=True, #output=True,
+        available_ports = self.client.list_ports(input=True, output=True,
                                                  include_midi_through=False)
 
         if len(available_ports) == 0:
