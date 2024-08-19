@@ -1,6 +1,6 @@
-#!/home/krid/bin/pyvirtenv/bin/python3
+#!/usr/bin/env python3
 #
-# Copyright (C) 2022 Dirk Bergstrom <dirk@otisbean.com>. All Rights Reserved.
+# Copyright (C) 2022-2024 Dirk Bergstrom <dirk@otisbean.com>. All Rights Reserved.
 #
 # Xlib code for keystroke generation originally by Joel Holveck <joelh@piquan.org>
 #
@@ -44,6 +44,12 @@ Input = namedtuple("Input", ('control', 'keyspec', 'desc'))
 #     )
 # }
 #
+# Where:
+#   <typ> is 1 (on/off button) or 2 (stick / trigger / throttle / etc)
+#   <number> varies between manufacturers; use "jstest /dev/input/js0"
+#     The numbers shown below work for most, but not all, gamepads.
+#   <value> is the value that triggers the behavior.
+#
 # Where <key spec> is one of:
 #
 # str => Emit this key (see keysymdef.h)
@@ -71,7 +77,8 @@ Input = namedtuple("Input", ('control', 'keyspec', 'desc'))
 # * The joystick drivers supposedly support some level of auto-repeat.  You
 #   need to set an ioctl to turn it on.  Joel knows how...
 #
-# See /usr/include/X11/keysymdef.h for keycodes
+# See /usr/include/X11/keysymdef.h (from x11proto-core-dev) for keycodes.
+# There's also some multimedia keys in XF86keysym.h.
 MAPPING = {
     (2, 8, 32767): Input('dpad-right', 'Right', 'Right'),
     (2, 8, -32767): Input('dpad-left', 'Left', 'Left'),

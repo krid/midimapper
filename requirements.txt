@@ -1,0 +1,11 @@
+# This is the One True Xlib; see https://stackoverflow.com/a/74716290
+# It’s installed to the system Python on Debian and Ubuntu as
+# python3-xlib, but in PyPi, that's also the name of a different
+# library.
+python-xlib~=0.33
+
+# The ALSA MIDI library is used for midimapper.py; you can skip it for
+# joymapper.py.  You'll need ALSA installed, but it's very common.  On
+# Debian or Ubuntu, you can install ALSA as libasound2; you might also
+# need libasound2-dev.
+alsa_midi~=1.0.2

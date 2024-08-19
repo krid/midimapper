@@ -1,4 +1,4 @@
-#!/home/krid/bin/pyvirtenv/bin/python3
+#!/usr/bin/env python3
 #
 # Copyright (C) 2022-2024 Dirk Bergstrom <dirk@otisbean.com>. All Rights Reserved.
 #
@@ -78,7 +78,8 @@ BOING = Action('Boing', 'Boing')
 #    key combo `Alt-3`, immediately followed by the `right-arrow` key, and print
 #    "Flag Green" to the console.
 # 
-# See /usr/include/X11/keysymdef.h for keycodes
+# See /usr/include/X11/keysymdef.h (from x11proto-core-dev) for keycodes.
+# There's also some multimedia keys in XF86keysym.h.
 NOTE_MAPPING = {
     0: Button("push-controller-1", Action('Delete', 'Delete')),
     8: Button("button-1", Action([('Meta_L', '3'), 'Right'], 'Flag Green')),
