@@ -142,17 +142,16 @@ CONTROL_MAPPING = {
                 Action([('Control_L', 'Alt_L', 'E')], 'Fit to Window')),
 }
 
-# What device are we looking at?
-CONTROLLER_DEVICE = "X-TOUCH MINI"
-
 
 class Program:
     """The action all happens here"""
 
     control_default = 64
 
-    def __init__(self, dry_run) -> None:
+    def __init__(self, dry_run, controller, client_name) -> None:
         self.dry_run = dry_run
+        self.controller = controller
+        self.client_name = client_name
         self.state = {}
 
     def init_knobs(self):
@@ -358,13 +357,50 @@ class Program:
             raise Exception("Cannot get XTEST extension")
 
         # Connect to the MIDI device.
-        # TODO This is kind of cargo-culted from the library's example code.
-        # I need to understand this stuff better.
-        self.client = SequencerClient(CONTROLLER_DEVICE)
-        self.port = self.client.create_port("inout")
-        self.port.connect_from(self.client.list_ports()[0])
-        self.port.connect_to(self.client.list_ports()[0])
-        logging.info("Mapping inputs from %s", CONTROLLER_DEVICE)
+        # TODO This is kind of cargo-culted from the library's example code,
+        # and tweaked a tad by Joel.  I need to understand this stuff better.
+
+        # Create a client, that is, a connection to the ALSA MIDI system.
+        self.client = SequencerClient(self.client_name)
+
+        # Pick which remote port we want to talk to.  Only select
+        # devices that can send and receive, and ignore MIDI THRU
+        # ports.  The default flags already ignore system, no-export,
+        # and unconnectable ports.
+        available_ports = self.client.list_ports(input=True, #output=True,
+                                                 include_midi_through=False)
+
+        if len(available_ports) == 0:
+            logging.error("No MIDI ports available")
+            sys.exit(1)
+
+        if self.controller is None:
+            # The list is sorted so that the "most usable" ones come
+            # first.
+            controller_port = available_ports[0]
+        else:
+            for port in available_ports:
+                if self.controller in (port.name, port.client_name):
+                    controller_port = port
+                    break
+            else:
+                available_port_names = []
+                for port in available_ports:
+                    available_port_names += [port.client_name, port.name]
+                logging.error("Specified controller %r is not available. "
+                              "Choose from: %r",
+                              self.controller, available_port_names)
+                sys.exit(1)
+
+        # I guess we should tell the user what's up.
+        logging.info("Mapping inputs from %s", controller_port.name)
+
+        # Create a port, something that can send and receive events.
+        self.port = self.client.create_port(f"{self.client_name} port")
+        # Set our port up to receive events from the controller...
+        self.port.connect_from(controller_port)
+        # ...and to send events to the controller.
+        self.port.connect_to(controller_port)
 
         self.init_knobs()
 
@@ -377,7 +413,7 @@ class Program:
                 # For now we gracefully exit.
                 # TODO Consider waiting for a reconnection?
                 logging.info("Controller '%s' disconnected or unavailable.",
-                            CONTROLLER_DEVICE)
+                            self.controller)
                 sys.exit(0)
             elif event.type == NoteOnEvent.type:
                 # This is a button press; we trigger on the button release event.
@@ -410,8 +446,13 @@ if __name__ == "__main__":
         help="Show debug info and unused controller inputs")
     parser.add_argument("--dry-run", "-n", action="store_true",
         help="Don't actually emit X keystrokes")
+    parser.add_argument("--client-name", action="store", default="midimapper",
+        help="Name to give our ALSA MIDI endpoint")
+    parser.add_argument("--controller", "-c", action="store",
+        help="MIDI controller name to listen to")
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s %(levelname)s: %(message)s")
 
-    Program(args.dry_run).run()
+    Program(args.dry_run, controller=args.controller,
+            client_name=args.client_name).run()

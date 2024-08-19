@@ -80,6 +80,8 @@ Input = namedtuple("Input", ('control', 'keyspec', 'desc'))
 #
 # See /usr/include/X11/keysymdef.h (from x11proto-core-dev) for keycodes.
 # There's also some multimedia keys in XF86keysym.h.
+#
+# FIXME: Read from a config file
 MAPPING = {
     (2, 8, 32767): Input('dpad-right', 'Right', 'Right'),
     (2, 8, -32767): Input('dpad-left', 'Left', 'Left'),
@@ -107,7 +109,7 @@ MAPPING = {
 }
 
 # What device are we looking at?
-CONTROLLER_DEVICE = '/dev/input/js0'
+DEFAULT_CONTROLLER_DEVICE = '/dev/input/js0'
 
 # Format of the packets we get from /dev/input/js0
 # See below where we call .unpack
@@ -115,6 +117,9 @@ INPUT_STRUCT = struct.Struct('IhBB')
 
 
 class Program:
+
+    def __init__(self, controller):
+        self.controller = controller
 
     @functools.cache()
     def keysym2code(self, key):
@@ -163,7 +168,7 @@ class Program:
         if not evbuf:
             # In practice we only get here in the ENODEV case
             logging.info("Controller disconnected or unavailable at '%s'.",
-                         CONTROLLER_DEVICE)
+                         self.controller)
             sys.exit(0)
 
         # *** THIS IS WHERE WE DISPATCH JOYSTICK STUFF TO X STUFF ***
@@ -205,8 +210,8 @@ class Program:
         if ext is None:
             raise Exception("Cannot get XTEST extension")
 
-        self.jsdev = open(CONTROLLER_DEVICE, 'rb')
-        logging.info("Mapping inputs from %s", CONTROLLER_DEVICE)
+        self.jsdev = open(self.controller, 'rb')
+        logging.info("Mapping inputs from %s", self.controller)
 
         while True:
             (ready_to_read, _, _) = select.select(
@@ -221,10 +226,13 @@ class Program:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--controller", action="store",
+        default=DEFAULT_CONTROLLER_DEVICE,
+        help="Listen to this input")
     parser.add_argument("--debug", "-d", action="store_true",
         help="Show debug info and unused controller inputs")
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.debug else logging.INFO,
         format="%(asctime)s %(levelname)s: %(message)s")
 
-    Program().run()
+    Program(controller=args.controller).run()
