@@ -47,56 +47,76 @@ Cmd = namedtuple("Cmd", ('arg_list',))
 # Special easter egg action
 BOING = Action('Boing', 'Boing')
 
-# <ControlChangeEvent channel=10 param=2 value=2>
-# <ControlChangeEvent channel=10 param=2 value=1>
-# <NoteOnEvent channel=10 note=0 velocity=127>
-# <NoteOffEvent channel=10 note=0 velocity=0>
-# <NoteOnEvent channel=10 note=8 velocity=127>
+# NOTE_MAPPING
+# This defines a mapping between a MIDI "note" (basically a button press)
+# and some action (e.g. a keyboard shortcut).  It's a dict keyed on note ID,
+# where each value is a Button namedtuple containing:
 #
-# https://python-alsa-midi.readthedocs.io/en/latest/api_events.html
+# ("button-name", Action())
 #
-# MAPPING = {
-#     (EventType, param, value): Input(
-#         "controller-input-name",
-#         <key spec>,
-#         "key spec description"
-#     )
-# }
+# The Action, in turn is:
+#
+# (<key spec>, "human-readable description")
 #
 # Where <key spec> is one of:
 #
-# str => Emit this key (see /usr/include/X11/keysymdef.h)
-# function => run the function (for strange / complex stuff)
-# list => Emit multiple keys or chords
-#
-# Multi-key list elements:
-#
 # tuple => emit chord
-# str => emit key
+# str => Emit this key (see /usr/include/X11/keysymdef.h)
 # int => wait X miliseconds
+# Cmd() => Run the given command-and-arguments list
+# list => Emit a sequence of key specs
 #
+# TODO function => run the function (for strange / complex stuff)
+#
+# So this entry:
+# 
+# 8: Button("button-1", Action([('Meta_L', '3'), 'Right'], 'Flag Green')),
+# 
+# Translates to:
+# 
+#    When button 8 is released, log an event for `button-1`, and then send the
+#    key combo `Alt-3`, immediately followed by the `right-arrow` key, and print
+#    "Flag Green" to the console.
+# 
 # See /usr/include/X11/keysymdef.h for keycodes
 NOTE_MAPPING = {
     0: Button("push-controller-1", Action('Delete', 'Delete')),
     8: Button("button-1", Action([('Meta_L', '3'), 'Right'], 'Flag Green')),
     9: Button("button-2", Action([('Meta_L', '2'), 'Right'], 'Flag Yellow')),
     10: Button("button-3", Action([('Meta_L', '1'), 'Right'], 'Flag Red')),
-    11: Button("button-4", Action([('Meta_L', '0')], 'Clear Flag')),
+    11: Button("button-4", Action(('Meta_L', '0'), 'Clear Flag')),
     12: Button("button-5", Action(Cmd(["toggle-grayscale.sh"]), 'Toggle Greyscale')),
     13: Button("button-6", Action('Delete', 'Delete')),
     #13: Button("button-6", Action([('Control_L', 'Alt_L', '1')], 'Red')),
     14: Button("button-7", Action('Escape', 'Escape')),
     15: Button("button-8", Action('F3', 'Preview')),
-    16: Button("button-9", Action([('Control_L', '1')], 'One Star')),
-    17: Button("button-10", Action([('Control_L', '2')], 'Two Stars')),
-    18: Button("button-11", Action([('Control_L', '3')], 'Three Stars')),
-    19: Button("button-12", Action([('Control_L', '0')], 'Zero Stars')),
+    16: Button("button-9", Action(('Control_L', '1'), 'One Star')),
+    17: Button("button-10", Action(('Control_L', '2'), 'Two Stars')),
+    18: Button("button-11", Action(('Control_L', '3'), 'Three Stars')),
+    19: Button("button-12", Action(('Control_L', '0'), 'Zero Stars')),
     20: Button("button-13", BOING),
-    21: Button("button-22", Action([('Control_L', 'slash')], 'Flip Vertical')),
-    22: Button("button-23", Action([('Control_L', 'Shift_L', 'asterisk')], 'Flip Horizontal')),
-    23: Button("button-24", Action([('Control_L', 'period')], 'Toggle Zoom')),
+    21: Button("button-22", Action(('Control_L', 'slash'), 'Flip Vertical')),
+    22: Button("button-23", Action(('Control_L', 'Shift_L', 'asterisk'), 'Flip Horizontal')),
+    23: Button("button-24", Action(('Control_L', 'period'), 'Toggle Zoom')),
     #: Button("button-", Action()),
 }
+
+# CONTROL_MAPPING
+# As above for NOTE_MAPPING, but this maps continuous controls like spinners
+# and sliders.
+#
+# The `name` field is used as the key in the dict for storing control state, so
+# it must be unique and should be diagnostic.
+#
+# Spinners have two Actions: clockwise/up and counter-clockwise/down.
+# Spinners are implemented as continuous controls that wrap around, as opposed
+# to hitting an imaginary stop.
+# 
+# Sliders have a `delta` argument which specifies how much change will
+# trigger the effect, and three Actions: up, down, and return-to-zero
+# (useful for resetting the slider).
+#
+# An Action may be `None`, in which case nothing will happen.
 CONTROL_MAPPING = {
     1: Spinner('spinner-1',
                 Action('Right', 'Move Right'),
@@ -126,14 +146,20 @@ CONTROLLER_DEVICE = "X-TOUCH MINI"
 
 
 class Program:
+    """The action all happens here"""
 
     control_default = 64
 
     def __init__(self, dry_run) -> None:
         self.dry_run = dry_run
         self.state = {}
+
     def init_knobs(self):
         """Set all the knob controllers to their middle value, the fun way.
+
+        The X-Touch MINI has some state memory, so the values of the inputs
+        and their associated lights need to be set to a known state.  I got
+        just a bit carried away implementing this code...
         """
         def do_strobe(val):
             for param in range(1, 9):
@@ -167,18 +193,26 @@ class Program:
         self.client.drain_output()
 
     def set_control(self, param, new_value):
+        """Set a MIDI control to a specific value.
+        
+        Used when wrapping a spinner around from 127 <=> 0.
+        """
         nevt = ControlChangeEvent(channel=10, param=param, value=new_value)
         self.client.event_output(nevt, port=self.port)
         self.client.drain_output()
 
     @functools.lru_cache()
     def keysym2code(self, key):
+        """Get the actual X keycode from the textual keysim value."""
         rv = self.display.keysym_to_keycode(Xlib.XK.string_to_keysym(key))
         if not rv:              # I think it returns 0, but maybe None
             raise Exception("No keycode for keysym '{}'".format(key))
         return rv
 
     def send_chord(self, keys):
+        """Send X keypress events for each of the keys, wait 10ms, then release
+        the keys in reverse order with a 20ms delay.
+        """
         logging.debug("chord=%s", keys)
         keycodes = list(map(self.keysym2code, keys))
         if self.dry_run:
@@ -195,6 +229,7 @@ class Program:
         self.display.flush()
 
     def send_key(self, key):
+        """Send a single X keystroke via "press" and "release"."""
         logging.debug("key=%s", key)
         keycode = self.keysym2code(key)
         if self.dry_run:
@@ -203,25 +238,35 @@ class Program:
         self.display.xtest_fake_input(Xlib.X.KeyRelease, keycode)
         self.display.flush()
 
-    def handle_slider(self, slider, event):
+    def handle_slider(self, slider_spec, event):
+        """Handle a slider change event.
+        
+        If the difference between current and previous value exceeds
+        slider_spec.delta, or the slider is changed to zero, the relevant
+        Action is returned.  Otherwise we return None.
+        """
         # control, delta, value, action_up, action_down, action_zero
-        prev_value = self.state.get(slider.control)
-        if event.value == 0 and slider.action_zero is not None:
-            self.state[slider.control] = 0
-            return slider.action_zero
+        prev_value = self.state.get(slider_spec.control)
+        if event.value == 0 and slider_spec.action_zero is not None:
+            self.state[slider_spec.control] = 0
+            return slider_spec.action_zero
         if prev_value is None:
             # We have no way of knowing where the slider was before...
-            self.state[slider.control] = event.value
+            self.state[slider_spec.control] = event.value
             return None
-        if event.value < prev_value - slider.delta:
-            self.state[slider.control] = event.value
-            return slider.action_down
-        if event.value == 127 or event.value > prev_value + slider.delta:
-            self.state[slider.control] = event.value
-            return slider.action_up
+        if event.value < prev_value - slider_spec.delta:
+            self.state[slider_spec.control] = event.value
+            return slider_spec.action_down
+        if event.value == 127 or event.value > prev_value + slider_spec.delta:
+            self.state[slider_spec.control] = event.value
+            return slider_spec.action_up
         return None
 
     def handle_spinner(self, spinner, event):
+        """Handle a spinner change event.
+        
+        Handles wraparound when the spinner hits the ends of its built-in range.
+        """
         # control, value, action_up, action_down
         prev_value = self.state.get(spinner.control, self.control_default)
         new_value = event.value
@@ -246,43 +291,74 @@ class Program:
         return retval
 
     def run_command(self, cmd_spec):
+        """Run a command as specified by a Cmd namedtuple."""
         try:
             run(cmd_spec.arg_list)
         except CalledProcessError:
             logging.info("Command '%s' failed.", cmd_spec.arg_list[0])
 
     def do_action(self, action):
+        """Do whatever the supplied Action specifies."""
         if action == BOING:
             self.init_knobs()
             return
         logging.info("Action %s => %s", action.desc, action.keyspec)
         if not action.keyspec:
-            pass
-        if isinstance(action.keyspec, Cmd):
-            self.run_command(action.keyspec)
-        elif isinstance(action.keyspec, list):
-            for elem in action.keyspec:
-                if isinstance(elem, str):
-                    self.send_key(elem)
-                elif isinstance(elem, int):
-                    time.sleep(elem)
-                elif isinstance(elem, tuple):
-                    self.send_chord(elem)
-                else:
-                    raise Exception(
-                        "Unsupported keyspec of type {} in Action {}".
-                        format(type(elem), action))
-        elif isinstance(action.keyspec, str):
-            self.send_key(action.keyspec)
+            return
+        self._do_keyspec(action.keyspec, action)
+
+    def _do_keyspec(self, keyspec, action):
+        """Actually do the thing specified in the keyspec.
+        
+        Send some keystroke(s), run a command, or recurse on list elements.
+
+        Note that order is important here, as Cmd() is a namedTUPLE, and thus
+        is an instance of `tuple`.
+        """
+        if isinstance(keyspec, Cmd):
+            self.run_command(keyspec)
+        elif isinstance(keyspec, list):
+            # List of things to do
+            for elem in keyspec:
+                self._do_keyspec(elem, action)
+        elif isinstance(keyspec, tuple):
+            self.send_chord(keyspec)
+        elif isinstance(keyspec, str):
+            self.send_key(keyspec)
+        elif isinstance(keyspec, int):
+            # Sleep times are specified in milliseconds
+            time.sleep(keyspec / 1000)
+        else:
+            raise Exception(
+                f"Unsupported keyspec of type {type(keyspec)} in Action {action}")
 
     def run(self):
+        """The main loop of the program.
+
+        Initialize the Xlib code for sending keystrokes.
+        Initialize the MIDI client API.
+        Listen to the stream of MIDI events and dispatch the defined actions.
+        Exit when the MIDI controller is disconnected.
+
+        The stream of MIDI events looks like this:
+        <ControlChangeEvent channel=10 param=2 value=2>
+        <ControlChangeEvent channel=10 param=2 value=1>
+        <NoteOnEvent channel=10 note=0 velocity=127>
+        <NoteOffEvent channel=10 note=0 velocity=0>
+        <NoteOnEvent channel=10 note=8 velocity=127>
+        https://python-alsa-midi.readthedocs.io/en/latest/api_events.html
+        """
+        # Get a handle for the Display
         self.display = Xlib.display.Display()
+        # Verify that the XTEST extension is present.  This is what we use
+        # to send fake key events.
         ext = self.display.query_extension('XTEST')
         if ext is None:
             raise Exception("Cannot get XTEST extension")
 
         # Connect to the MIDI device.
-        # FIXME need to understand this stuff better.
+        # TODO This is kind of cargo-culted from the library's example code.
+        # I need to understand this stuff better.
         self.client = SequencerClient(CONTROLLER_DEVICE)
         self.port = self.client.create_port("inout")
         self.port.connect_from(self.client.list_ports()[0])
@@ -303,7 +379,7 @@ class Program:
                             CONTROLLER_DEVICE)
                 sys.exit(0)
             elif event.type == NoteOnEvent.type:
-                # We trigger on button release, and ignore the press
+                # This is a button press; we trigger on the button release event.
                 continue
             elif event.type == NoteOffEvent.type:
                 # A button release, which maps directly to an Action
@@ -322,6 +398,7 @@ class Program:
                     logging.error("Unsupported handler type '%s'.", handler)
             else:
                 logging.debug("Unsupported event type '%s'.", event.type)
+            # Only some events actually trigger Actions
             if action:
                 self.do_action(action)
 
