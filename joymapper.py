@@ -17,6 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
+import errno
 import functools
 import select
 import struct
@@ -108,10 +109,14 @@ MAPPING = {
 # What device are we looking at?
 CONTROLLER_DEVICE = '/dev/input/js0'
 
+# Format of the packets we get from /dev/input/js0
+# See below where we call .unpack
+INPUT_STRUCT = struct.Struct('IhBB')
+
 
 class Program:
 
-    @functools.lru_cache()
+    @functools.cache()
     def keysym2code(self, key):
         rv = self.display.keysym_to_keycode(Xlib.XK.string_to_keysym(key))
         if not rv:              # I think it returns 0, but maybe None
@@ -148,15 +153,15 @@ class Program:
     def handle_js(self):
         evbuf = None
         try:
-            evbuf = self.jsdev.read(8)
+            evbuf = self.jsdev.read(INPUT_STRUCT.size)
         except OSError as ose:
-            if ose.errno == 19:
-                # 19 == No such device == disconnected
+            if ose.errno == errno.ENODEV:
+                # No such device == disconnected
                 pass
             else:
                 raise
         if not evbuf:
-            # In practice we only get here in the OSError case
+            # In practice we only get here in the ENODEV case
             logging.info("Controller disconnected or unavailable at '%s'.",
                          CONTROLLER_DEVICE)
             sys.exit(0)
@@ -170,7 +175,7 @@ class Program:
         # To see the names of X keysyms, see:
         #     X11/keysymdef.h
         # The Python keysymdef modules are based on the preceding #ifdef.
-        _time, value, typ, number = struct.unpack('IhBB', evbuf)
+        _time, value, typ, number = INPUT_STRUCT.unpack(evbuf)
         inp = MAPPING.get((typ, number, value))
         if inp:
             logging.info("Controller event %s => %s", inp.control, inp.desc)
