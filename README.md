@@ -9,8 +9,16 @@ used for pretty much anything.  I use it with a [Behringer X-Touch
 Mini](https://www.behringer.com/product.html?modelCode=0808-AAF), but it will
 (probably) work with other MIDI devices.
 
-Thanks to my pal [Joel Holveck](mailto:joelh@piquan.org) for the basic Xlib
-code, which I have since mangled into near-unrecognizability.
+You can make janky labels for the controller with little pieces of tape, or
+you can buy these really nice [die-cut overlays from
+Taktility](http://www.taktility.com/overlays/xtouch-mini/).
+
+Also included is `joymapper.py`, a predecessor utility driven by an Nvidia
+Shield game controller instead of the X-Touch.  It was awkward to use but
+proved the value of the concept.
+
+Many thanks to my pal [Joel Holveck](mailto:joelh@piquan.org) for the basic
+Xlib code, which I have since mangled into near-unrecognizability.
 
 # Requirements
 
