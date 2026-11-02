@@ -1,8 +1,6 @@
 #!/home/krid/bin/pyvirtenv/bin/python3
 #
-# Copyright (C) 2022-2024 Dirk Bergstrom <dirk@otisbean.com>. All Rights Reserved.
-#
-# Xlib code for keystroke generation originally by Joel Holveck <joelh@piquan.org>
+# Copyright (C) 2022-2026 Dirk Bergstrom <dirk@otisbean.com>. All Rights Reserved.
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -27,14 +25,7 @@ from subprocess import run, CalledProcessError
 
 from alsa_midi import SequencerClient, NoteOnEvent, NoteOffEvent, \
     ControlChangeEvent, PortUnsubscribedEvent
-
-import Xlib.X
-import Xlib.XK
-import Xlib.display
-# This isn't used, but it needs to be loaded to prime the extension.
-import Xlib.ext.xtest
-import Xlib.keysymdef.latin1
-import Xlib.keysymdef.miscellany
+from evdev import UInput, ecodes as ec
 
 Action = namedtuple("Action", ('keyspec', 'desc'))
 Button = namedtuple("Button", ('control', 'action'))
@@ -70,7 +61,7 @@ BOING = Action('Boing', 'Boing')
 #
 # So this entry:
 # 
-# 8: Button("button-1", Action([('Meta_L', '3'), 'Right'], 'Flag Green')),
+# 8: Button("button-1", Action([('LeftAlt', '3'), 'RIGHT'], 'Flag Green')),
 # 
 # Translates to:
 # 
@@ -78,29 +69,30 @@ BOING = Action('Boing', 'Boing')
 #    key combo `Alt-3`, immediately followed by the `right-arrow` key, and print
 #    "Flag Green" to the console.
 # 
-# See /usr/include/X11/keysymdef.h for keycodes
+# See uapi/linux/input-event-codes.h for keycodes
+# Note: We're not including the 'KEY_' prefix here
 NOTE_MAPPING = {
     0: Button("push-controller-1", Action('Delete', 'Delete')),
-    8: Button("button-1", Action([('Meta_L', '3'), 'Right'], 'Flag Green')),
-    9: Button("button-2", Action([('Meta_L', '2'), 'Right'], 'Flag Yellow')),
-    10: Button("button-3", Action([('Meta_L', '1'), 'Right'], 'Flag Red')),
+    8: Button("button-1", Action([('LeftAlt', '3'), 'Right'], 'Flag Green')),
+    9: Button("button-2", Action([('LeftAlt', '2'), 'Right'], 'Flag Yellow')),
+    10: Button("button-3", Action([('LeftAlt', '1'), 'Right'], 'Flag Red')),
     11: Button("button-4", Action([
-        'Left', ('Meta_L', '2'), 'Right', ('Meta_L', '3')],
+        'LEFT', ('LeftAlt', '2'), 'Right', ('LeftAlt', '3')],
         'Flag Prev Y, Flag This G')),
-    #11: Button("button-4", Action(('Meta_L', '0'), 'Clear Flag')),
+    #11: Button("button-4", Action(('LeftAlt', '0'), 'Clear Flag')),
     12: Button("button-5", Action(Cmd(["toggle-grayscale.sh"]), 'Toggle Greyscale')),
     13: Button("button-6", Action('Delete', 'Delete')),
-    #13: Button("button-6", Action([('Control_L', 'Alt_L', '1')], 'Red')),
-    14: Button("button-7", Action('Escape', 'Escape')),
+    #13: Button("button-6", Action([('RightCtrl', 'LeftAlt', '1')], 'Red')),
+    14: Button("button-7", Action('Esc', 'Escape')),
     15: Button("button-8", Action('F3', 'Preview')),
-    16: Button("button-9", Action(('Control_L', '1'), 'One Star')),
-    17: Button("button-10", Action(('Control_L', '2'), 'Two Stars')),
-    18: Button("button-11", Action(('Control_L', '3'), 'Three Stars')),
-    19: Button("button-12", Action(('Control_L', '0'), 'Zero Stars')),
+    16: Button("button-9", Action(('LeftCtrl', '1'), 'One Star')),
+    17: Button("button-10", Action(('LeftCtrl', '2'), 'Two Stars')),
+    18: Button("button-11", Action(('LeftCtrl', '3'), 'Three Stars')),
+    19: Button("button-12", Action(('LeftCtrl', '0'), 'Zero Stars')),
     20: Button("button-13", BOING),
-    21: Button("button-22", Action(('Control_L', 'slash'), 'Flip Vertical')),
-    22: Button("button-23", Action(('Control_L', 'Shift_L', 'asterisk'), 'Flip Horizontal')),
-    23: Button("button-24", Action(('Control_L', 'period'), 'Toggle Zoom')),
+    21: Button("button-22", Action(('LeftCtrl', 'SLASH'), 'Flip Vertical')),
+    22: Button("button-23", Action(('LeftCtrl', 'LeftShift', '8'), 'Flip Horizontal')),
+    23: Button("button-24", Action(('LeftCtrl', 'DOT'), 'Toggle Zoom')),
     #: Button("button-", Action()),
 }
 
@@ -128,25 +120,26 @@ CONTROL_MAPPING = {
                 Action('Up', 'Move Up'),
                 Action('Down', 'Move Down')),
     6: Spinner('spinner-6',
-                Action([('Control_L', 'Shift_R', 'Right')], 'Rotate Right'),
-                Action([('Control_L', 'Shift_R', 'Left')], 'Rotate Left'),
+                Action([('LeftCtrl', 'RightShift', 'Right')], 'Rotate Right'),
+                Action([('LeftCtrl', 'RightShift', 'Left')], 'Rotate Left'),
                 ),
     7: Spinner('spinner-7',
-                Action([('Shift_R', 'Left')], 'Pan Zoom Left'),
-                Action([('Shift_R', 'Right')], 'Pan Zoom Right')),
+                Action([('RightShift', 'Left')], 'Pan Zoom Left'),
+                Action([('RightShift', 'Right')], 'Pan Zoom Right')),
     8: Spinner('spinner-8',
-                Action([('Shift_R', 'Up')], 'Pan Zoom Up'),
-                Action([('Shift_R', 'Down')], 'Pan Zoom')),
+                Action([('RightShift', 'Up')], 'Pan Zoom Up'),
+                Action([('RightShift', 'Down')], 'Pan Zoom')),
     # We want ~6 levels of zoom; 127 / 6 = 21
     9: Slider('slider', 5,
-                Action([('Control_L', 'equal')], 'Zoom In'),
-                Action([('Control_L', 'minus')], 'Zoom Out'),
-                Action([('Control_L', 'Alt_L', 'E')], 'Fit to Window')),
+                Action([('LeftCtrl', 'Equal')], 'Zoom In'),
+                Action([('LeftCtrl', 'Minus')], 'Zoom Out'),
+                Action([('LeftAlt', 'RightCtrl', 'E')], 'Fit to Window')),
 }
 
 # What device are we looking at?
 CONTROLLER_DEVICE = "X-TOUCH MINI"
 CONTROLLER_PORT_NAME = 'Midimapper Port'
+
 
 class Program:
     """The action all happens here"""
@@ -204,42 +197,38 @@ class Program:
         self.client.event_output(nevt, port=self.port)
         self.client.drain_output()
 
-    @functools.lru_cache()
-    def keysym2code(self, key):
-        """Get the actual X keycode from the textual keysim value."""
-        rv = self.display.keysym_to_keycode(Xlib.XK.string_to_keysym(key))
-        if not rv:              # I think it returns 0, but maybe None
-            raise Exception("No keycode for keysym '{}'".format(key))
-        return rv
+    def sendkey(self, key, up_or_down):
+        """Send the key event, up=0, down=1.
+        """
+        self.uinput.write(ec.EV_KEY, ec.ecodes[f"KEY_{key.upper()}"], up_or_down)
 
     def send_chord(self, keys):
-        """Send X keypress events for each of the keys, wait 10ms, then release
-        the keys in reverse order with a 20ms delay.
+        """Send uinput key-down events for each of the keys, then send key-up
+        events in reverse order.
+
+        Note: A chord using the ALT and CTRL keys on the same side of the keyboard
+#       seems to ignore the CTRL, whereas using them from opposite sides works?
+
+        The X Input version needed a delay between the down & up events, but
+        Uinput doesn't appear to care.
         """
         logging.debug("chord=%s", keys)
-        keycodes = list(map(self.keysym2code, keys))
         if self.dry_run:
             return
-        # We set the times with 10ms between the modifiers, the final
-        # key, and the release.  (The default for the last argument is
-        # X.CurrentTime.)
-        for k in keycodes[:-1]:
-            self.display.xtest_fake_input(Xlib.X.KeyPress, k, 0)
-        self.display.xtest_fake_input(Xlib.X.KeyPress, keycodes[-1], 10)
-        for k in reversed(keycodes):
-            self.display.xtest_fake_input(Xlib.X.KeyRelease, k, 20)
-        # Send the event stream.
-        self.display.flush()
+        for k in keys:
+            self.sendkey(k, 1)
+        for k in reversed(keys):
+            self.sendkey(k, 0)
+        self.uinput.syn()
 
     def send_key(self, key):
-        """Send a single X keystroke via "press" and "release"."""
+        """Send a single keystroke via "press" and "release"."""
         logging.debug("key=%s", key)
-        keycode = self.keysym2code(key)
         if self.dry_run:
             return
-        self.display.xtest_fake_input(Xlib.X.KeyPress, keycode)
-        self.display.xtest_fake_input(Xlib.X.KeyRelease, keycode)
-        self.display.flush()
+        self.sendkey(key, 1)
+        self.sendkey(key, 0)
+        self.uinput.syn()
 
     def handle_slider(self, slider_spec, event):
         """Handle a slider change event.
@@ -351,13 +340,8 @@ class Program:
         <NoteOnEvent channel=10 note=8 velocity=127>
         https://python-alsa-midi.readthedocs.io/en/latest/api_events.html
         """
-        # Get a handle for the Display
-        self.display = Xlib.display.Display()
-        # Verify that the XTEST extension is present.  This is what we use
-        # to send fake key events.
-        ext = self.display.query_extension('XTEST')
-        if ext is None:
-            raise Exception("Cannot get XTEST extension")
+        # Get a handle for UInput
+        self.uinput = UInput()
 
         # Connect to the MIDI device.
         # TODO This is kind of cargo-culted from the library's example code.
@@ -386,6 +370,7 @@ class Program:
                 # TODO Consider waiting for a reconnection?
                 logging.info("Controller '%s' disconnected or unavailable.",
                             CONTROLLER_DEVICE)
+                self.uinput.close()
                 sys.exit(0)
             elif event.type == NoteOnEvent.type:
                 # This is a button press; we trigger on the button release event.
