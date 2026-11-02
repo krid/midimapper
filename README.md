@@ -17,13 +17,13 @@ Also included is `joymapper.py`, a predecessor utility driven by an Nvidia
 Shield game controller instead of the X-Touch.  It was awkward to use but
 proved the value of the concept.
 
-Many thanks to my pal [Joel Holveck](mailto:joelh@piquan.org) for the basic
-Xlib code, which I have since mangled into near-unrecognizability.
+Many thanks to my pal [Joel Holveck](mailto:joelh@piquan.org) for the
+original Xlib keyboard-simulation code.
 
 # Requirements
 
-Developed with Python 3.8, [python-alsa-midi 1.0.1](https://python-alsa-midi.readthedocs.io/en/latest/),
-and [xlib 0.21](https://pypi.org/project/xlib/).
+Developed with Python 3.12, [python-alsa-midi 1.0.4](https://python-alsa-midi.readthedocs.io/en/latest/),
+and [evdev 2.0.0](https://pypi.org/project/evdev/).
 
 # License
 
