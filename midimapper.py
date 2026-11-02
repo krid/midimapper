@@ -146,7 +146,7 @@ CONTROL_MAPPING = {
 
 # What device are we looking at?
 CONTROLLER_DEVICE = "X-TOUCH MINI"
-
+CONTROLLER_PORT_NAME = 'Midimapper Port'
 
 class Program:
     """The action all happens here"""
@@ -363,7 +363,13 @@ class Program:
         # TODO This is kind of cargo-culted from the library's example code.
         # I need to understand this stuff better.
         self.client = SequencerClient(CONTROLLER_DEVICE)
-        self.port = self.client.create_port("inout")
+        for port in self.client.list_ports():
+            if port.name == CONTROLLER_PORT_NAME:
+                logging.error("Another instance already connected to %s",
+                              CONTROLLER_DEVICE)
+                logging.error("Exiting.")
+                sys.exit(1)
+        self.port = self.client.create_port(CONTROLLER_PORT_NAME)
         self.port.connect_from(self.client.list_ports()[0])
         self.port.connect_to(self.client.list_ports()[0])
         logging.info("Mapping inputs from %s", CONTROLLER_DEVICE)
