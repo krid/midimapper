@@ -84,7 +84,10 @@ NOTE_MAPPING = {
     8: Button("button-1", Action([('Meta_L', '3'), 'Right'], 'Flag Green')),
     9: Button("button-2", Action([('Meta_L', '2'), 'Right'], 'Flag Yellow')),
     10: Button("button-3", Action([('Meta_L', '1'), 'Right'], 'Flag Red')),
-    11: Button("button-4", Action(('Meta_L', '0'), 'Clear Flag')),
+    11: Button("button-4", Action([
+        'Left', ('Meta_L', '2'), 'Right', ('Meta_L', '3')],
+        'Flag Prev Y, Flag This G')),
+    #11: Button("button-4", Action(('Meta_L', '0'), 'Clear Flag')),
     12: Button("button-5", Action(Cmd(["toggle-grayscale.sh"]), 'Toggle Greyscale')),
     13: Button("button-6", Action('Delete', 'Delete')),
     #13: Button("button-6", Action([('Control_L', 'Alt_L', '1')], 'Red')),
